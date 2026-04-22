@@ -96,3 +96,4 @@ Backend/API integration will be completed in upcoming phases.
 - Mobile application version  
 
 ---
+Added contribution by PradhamReddy
