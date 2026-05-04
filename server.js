@@ -1,6 +1,10 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const pool = require("./db");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 const PORT = 3001;
@@ -14,20 +18,107 @@ app.get("/", (req, res) => {
   res.send("API WORKING");
 });
 
-/* ============================= */
-/*  Carbon Emission API */
-/* ============================= */
+/* VERIFY TOKEN MIDDLEWARE */
+function verifyToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+
+  if (!authHeader) {
+    return res.status(401).json({ error: "No token provided" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded; // contains email
+    next();
+  } catch (err) {
+    return res.status(403).json({ error: "Invalid token" });
+  }
+}
+
+/*  REGISTER */
+app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: "All fields required" });
+    }
+
+    const existing = await pool.query(
+      "SELECT * FROM users WHERE email=$1",
+      [email]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: "Email already registered" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await pool.query(
+      "INSERT INTO users (name, email, password) VALUES ($1, $2, $3)",
+      [name, email, hashedPassword]
+    );
+
+    res.json({ message: "User registered successfully" });
+
+  } catch (err) {
+    console.error("Register error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+/*  LOGIN */
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const result = await pool.query(
+      "SELECT * FROM users WHERE email=$1",
+      [email]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
+
+    const user = result.rows[0];
+
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
+
+    const token = jwt.sign(
+      { email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    res.json({ token });
+
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+/*  EMISSION */
 app.post("/api/emission", async (req, res) => {
   try {
     const distance = req.body.distance;
 
     if (!distance) {
-      return res.status(400).json({ error: "Distance is required" });
+      return res.status(400).json({ error: "Distance required" });
     }
 
     const result = await pool.query("SELECT * FROM transport_modes");
 
-    const carRow = result.rows.find(row => row.mode_name === "Car");
+    const carRow = result.rows.find(r => r.mode_name === "Car");
     const carEmission = distance * carRow.carbon_per_km;
 
     const emissions = result.rows.map(row => {
@@ -43,46 +134,63 @@ app.post("/api/emission", async (req, res) => {
     res.json(emissions);
 
   } catch (err) {
-    console.error("Database error:", err);
-    res.status(500).json({ error: "Database error" });
+    console.error(err);
+    res.status(500).json({ error: "DB error" });
   }
 });
 
-/* ============================= */
-/*  Commute Cost API */
-/* ============================= */
+/*  COST */
 app.post("/api/cost", async (req, res) => {
   try {
     const distance = req.body.distance;
 
-    if (!distance) {
-      return res.status(400).json({ error: "Distance is required" });
-    }
-
     const result = await pool.query("SELECT * FROM transport_modes");
 
-    const costs = result.rows.map(row => {
-      const cost = distance * row.cost_per_km;
-
-      return {
-        mode: row.mode_name,
-        cost: cost.toFixed(2)
-      };
-    });
+    const costs = result.rows.map(row => ({
+      mode: row.mode_name,
+      cost: (distance * row.cost_per_km).toFixed(2)
+    }));
 
     res.json(costs);
 
   } catch (err) {
-    console.error("Database error:", err);
-    res.status(500).json({ error: "Database error" });
+    res.status(500).json({ error: "DB error" });
   }
 });
 
-
-/*  SAVE TRIP API (NEW) */
-app.post("/api/save-trip", async (req, res) => {
+/* ROUTE API  */
+app.post("/api/route", async (req, res) => {
   try {
-    const { email, from, to, mode, co2, cost } = req.body;
+    const { start, end } = req.body;
+
+    const response = await fetch(
+      "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": process.env.ORS_API_KEY
+        },
+        body: JSON.stringify({
+          coordinates: [start, end]
+        })
+      }
+    );
+
+    const data = await response.json();
+    res.json(data);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Route error" });
+  }
+});
+
+/*  SAVE TRIP (SECURE) */
+app.post("/api/save-trip", verifyToken, async (req, res) => {
+  try {
+    const email = req.user.email; // secure
+    const { from, to, mode, co2, cost } = req.body;
 
     await pool.query(
       `INSERT INTO trips 
@@ -91,19 +199,18 @@ app.post("/api/save-trip", async (req, res) => {
       [email, from, to, mode, co2, cost]
     );
 
-    res.json({ message: "Trip saved successfully" });
+    res.json({ message: "Trip saved" });
 
   } catch (err) {
-    console.error("Save trip error:", err);
-    res.status(500).json({ error: "Error saving trip" });
+    console.error(err);
+    res.status(500).json({ error: "Save failed" });
   }
 });
 
-
-/*  GET TRIPS API (NEW) */
-app.get("/api/trips/:email", async (req, res) => {
+/*  GET TRIPS (SECURE) */
+app.get("/api/trips", verifyToken, async (req, res) => {
   try {
-    const email = req.params.email;
+    const email = req.user.email; //  secure
 
     const result = await pool.query(
       "SELECT * FROM trips WHERE user_email=$1 ORDER BY date DESC",
@@ -113,14 +220,18 @@ app.get("/api/trips/:email", async (req, res) => {
     res.json(result.rows);
 
   } catch (err) {
-    console.error("Fetch trips error:", err);
-    res.status(500).json({ error: "Error fetching trips" });
+    console.error(err);
+    res.status(500).json({ error: "Fetch failed" });
   }
 });
 
+/* DB CHECK */
+pool.query("SELECT current_database()", (err, res) => {
+  if (err) console.error(err);
+  else console.log("Connected to DB:", res.rows[0].current_database);
+});
 
-/* Start Server */
-
+/* Start */
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

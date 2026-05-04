@@ -30,34 +30,6 @@
 
 </div>
 
-<script>
-
-function handleLogin(){
-
-var email=document.getElementById("email").value;
-var password=document.getElementById("password").value;
-
-var users=JSON.parse(localStorage.getItem("gcp_users")||"[]");
-
-for(var i=0;i<users.length;i++){
-
-if(users[i].email===email && users[i].password===password){
-
-localStorage.setItem("gcp_current_user",email);
-
-window.location.href="dashboard.html";
-
-return;
-
-}
-
-}
-
-document.getElementById("error-msg").style.display="block";
-
-}
-
-</script>
-
+<script src="js/login.js"></script>
 </body>
 </html>

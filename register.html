@@ -33,52 +33,7 @@
     </div>
   </div>
 
-  <script>
-    function handleRegister() {
-      var name     = document.getElementById("name").value;
-      var email    = document.getElementById("email").value;
-      var password = document.getElementById("password").value;
-      var confirm  = document.getElementById("confirm").value;
-      var errorMsg   = document.getElementById("error-msg");
-      var successMsg = document.getElementById("success-msg");
-
-      errorMsg.style.display   = "none";
-      successMsg.style.display = "none";
-
-      if (name === "" || email === "" || password === "" || confirm === "") {
-        errorMsg.innerText = "Please fill in all fields!";
-        errorMsg.style.display = "block";
-        return;
-      }
-
-      if (password !== confirm) {
-        errorMsg.innerText = "Passwords do not match!";
-        errorMsg.style.display = "block";
-        return;
-      }
-
-      // Get existing users from localStorage
-      var users = JSON.parse(localStorage.getItem("gcp_users") || "[]");
-
-      // Check if email already registered
-      for (var i = 0; i < users.length; i++) {
-        if (users[i].email === email) {
-          errorMsg.innerText = "This email is already registered!";
-          errorMsg.style.display = "block";
-          return;
-        }
-      }
-
-      // Save new user
-      users.push({ name: name, email: email, password: password });
-      localStorage.setItem("gcp_users", JSON.stringify(users));
-
-      successMsg.style.display = "block";
-      setTimeout(function() {
-        window.location.href = "login.html";
-      }, 1500);
-    }
-  </script>
+<script src="js/register.js"></script>
 
 </body>
 </html>
